@@ -111,6 +111,12 @@ let auctionState = {
 
 };
 let timerInterval = null;
+let slideshowState = {
+    active: false,
+    currentIndex: 0,
+    players: []
+};
+let slideshowInterval = null;
 
 function getFinalCallText(seconds) {
     if (seconds > 25) return "Are there any further bids?";
@@ -574,6 +580,29 @@ socket.on('markUnsold', async () => {
         });
     }
 });
+    // --- SLIDESHOW LOGIC ---
+    socket.on('toggleSlideshow', async (shouldStart) => {
+        if (shouldStart) {
+            const unsoldPlayers = await Player.find({ status: 'Unsold' });
+            if (unsoldPlayers.length === 0) return socket.emit('errorMsg', "No unsold players to show!");
+            
+            slideshowState = { active: true, currentIndex: 0, players: unsoldPlayers };
+            io.emit('updateSlideshow', slideshowState);
+
+            // Auto-rotate every 5 seconds
+            clearInterval(slideshowInterval);
+            slideshowInterval = setInterval(() => {
+                slideshowState.currentIndex = (slideshowState.currentIndex + 1) % slideshowState.players.length;
+                io.emit('updateSlideshow', slideshowState);
+            }, 5000);
+        } else {
+            clearInterval(slideshowInterval);
+            slideshowState = { active: false, currentIndex: 0, players: [] };
+            io.emit('updateSlideshow', slideshowState);
+        }
+    });
+
+
     // Add this inside your io.on('connection', ...) block
 socket.on('updatePlayerImage', async ({ playerId, imageUrl }) => {
     try {
