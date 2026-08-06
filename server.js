@@ -324,14 +324,29 @@ socket.on('createNewTeam', async ({ name, budget }) => {
     socket.on('startAuction', async ({ playerId, baseValue }) => {
     const player = await Player.findById(playerId);
     if (player) {
+        // --- ADD THIS LINE ---
+        // Reset status so an 'Unsold' player becomes 'Available' again during bidding
+        await Player.findByIdAndUpdate(playerId, { status: 'Available', soldTo: '-' });
+        
         auctionState = { 
             activePlayerId: player, 
             currentBid: baseValue, 
             highestBidder: 'No Bids Yet', 
-            timeLeft: 120,
-            skippedTeams: [] // Reset for new player
+            timeLeft: 60,
+            skippedTeams: [] 
         };
+        
+        // Broadcast the status reset to the list
+        io.emit('updatePlayers', await Player.find());
         io.emit('updateAuction', auctionState);
+        
+        // Optional: Notify the chat
+        io.emit('newMessage', { 
+            sender: "SYSTEM", 
+            role: "admin", 
+            text: `📢 RE-ENTRY: ${player.name} is back on the auction block!` 
+        });
+        
         startTimer();
     }
 });
