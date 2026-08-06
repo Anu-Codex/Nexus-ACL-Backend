@@ -178,57 +178,78 @@ const upload = multer({ storage: multer.memoryStorage() });
 // --- CSV BULK IMPORT ROUTE ---
 app.post('/upload-csv', upload.single('playerCsv'), async (req, res) => {
     try {
-        const results = [];
-        const bufferStream = new Readable();
-        bufferStream.push(req.file.buffer);
-        bufferStream.push(null);
+        if (!req.file) return res.status(400).send({ message: "No file uploaded" });
 
-        bufferStream
-            .pipe(csv())
+        const results = [];
+        const stream = Readable.from(req.file.buffer);
+
+        stream
+            .pipe(csv({
+                // This removes any hidden spaces at the start or end of the CSV headers
+                mapHeaders: ({ header }) => header.trim() 
+            }))
             .on('data', (data) => results.push(data))
             .on('end', async () => {
-                const playersToInsert = results.map(row => {
-                    // Mapping your CSV Columns to DB Schema
-                    const name = row['1. Your Full Name'];
-                    const phone = row['3. Your Personal Phone No.? (Whatsapp)'];
-                    const strength = parseInt(row['5. Your Team Strength']);
-                    const imageUrl = row['6. Screenshot Of Your Team'];
+                try {
+                    const playersToInsert = results.map((row, index) => {
+                        // We use Object.keys to find the right column even if the numbers change
+                        const findValue = (keywords) => {
+                            const key = Object.keys(row).find(k => keywords.every(kw => k.toLowerCase().includes(kw.toLowerCase())));
+                            return key ? row[key] : null;
+                        };
 
-                    // Logic: Auto-assign Tier and Base Price based on Strength
-                    let cardType = "Nebula";
-                    let baseValue = 50;
+                        const name = findValue(['Full Name']) || `Player ${index + 1}`;
+                        const phoneStr = findValue(['Phone', 'Whatsapp']) || "0";
+                        const strengthStr = findValue(['Team Strength']) || "0";
+                        const imageUrl = findValue(['Screenshot', 'Team']) || "";
 
-                    if (strength >= 3300) { cardType = "Supernova"; baseValue = 150; }
-                    else if (strength >= 3250) { cardType = "Nova"; baseValue = 120; }
-                    else if (strength >= 3200) { cardType = "Quasar"; baseValue = 100; }
-                    else if (strength >= 3150) { cardType = "Nebula"; baseValue = 80; }
+                        const strength = parseInt(strengthStr.toString().replace(/,/g, '')) || 0;
+                        const phone = parseInt(phoneStr.toString().replace(/[^0-9]/g, '')) || 0;
 
-                    return {
-                        name: name,
-                        strength: strength,
-                        cardType: cardType,
-                        baseValue: baseValue,
-                        phone: phone,
-                        imageUrl: imageUrl,
-                        status: 'Available',
-                        soldTo: '-'
-                    };
-                });
+                        // AUTO-TIERING LOGIC
+                        let cardType = "Nebula";
+                        let baseValue = 50;
 
-                // Insert into Database
-                await Player.insertMany(playersToInsert);
-                
-                // Refresh all connected screens
-                const allPlayers = await Player.find();
-                io.emit('updatePlayers', allPlayers);
-                
-                res.send({ message: `✅ Successfully imported ${playersToInsert.length} players!` });
+                        if (strength >= 3300) { cardType = "Supernova"; baseValue = 150; }
+                        else if (strength >= 3250) { cardType = "Nova"; baseValue = 120; }
+                        else if (strength >= 3200) { cardType = "Quasar"; baseValue = 100; }
+                        else if (strength >= 3150) { cardType = "Nebula"; baseValue = 80; }
+
+                        return {
+                            name: name.trim(),
+                            strength: strength,
+                            cardType: cardType,
+                            baseValue: baseValue,
+                            phone: phone,
+                            imageUrl: imageUrl.trim(),
+                            status: 'Available',
+                            soldTo: '-'
+                        };
+                    });
+
+                    if (playersToInsert.length === 0) {
+                        return res.status(400).send({ message: "CSV file is empty or formatted incorrectly." });
+                    }
+
+                    // Clear existing Available players to avoid duplicates (Optional)
+                    // await Player.deleteMany({ status: 'Available' });
+
+                    await Player.insertMany(playersToInsert);
+                    
+                    const allPlayers = await Player.find();
+                    io.emit('updatePlayers', allPlayers);
+                    
+                    res.send({ message: `✅ Successfully imported ${playersToInsert.length} players!` });
+                } catch (dbErr) {
+                    console.error("Import logic error:", dbErr);
+                    res.status(500).send({ message: "Data processing error: " + dbErr.message });
+                }
             });
     } catch (err) {
-        res.status(500).send({ message: "Import failed: " + err.message });
+        console.error("Server upload error:", err);
+        res.status(500).send({ message: "Server Error: " + err.message });
     }
 });
-
 // --- SOCKETS ---
 io.on('connection', async (socket) => {
     socket.emit('initialData', {
