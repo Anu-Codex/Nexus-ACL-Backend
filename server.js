@@ -170,6 +170,64 @@ async function autoSellPlayer() {
         io.emit('updateAuction', auctionState);
     }
 }
+const csv = require('csv-parser');
+const { Readable } = require('stream');
+const multer = require('multer');
+const upload = multer({ storage: multer.memoryStorage() });
+
+// --- CSV BULK IMPORT ROUTE ---
+app.post('/upload-csv', upload.single('playerCsv'), async (req, res) => {
+    try {
+        const results = [];
+        const bufferStream = new Readable();
+        bufferStream.push(req.file.buffer);
+        bufferStream.push(null);
+
+        bufferStream
+            .pipe(csv())
+            .on('data', (data) => results.push(data))
+            .on('end', async () => {
+                const playersToInsert = results.map(row => {
+                    // Mapping your CSV Columns to DB Schema
+                    const name = row['1. Your Full Name'];
+                    const phone = row['3. Your Personal Phone No.? (Whatsapp)'];
+                    const strength = parseInt(row['5. Your Team Strength']);
+                    const imageUrl = row['6. Screenshot Of Your Team'];
+
+                    // Logic: Auto-assign Tier and Base Price based on Strength
+                    let cardType = "Nebula";
+                    let baseValue = 50;
+
+                    if (strength >= 3300) { cardType = "Supernova"; baseValue = 150; }
+                    else if (strength >= 3250) { cardType = "Nova"; baseValue = 120; }
+                    else if (strength >= 3200) { cardType = "Quasar"; baseValue = 100; }
+                    else if (strength >= 3150) { cardType = "Nebula"; baseValue = 80; }
+
+                    return {
+                        name: name,
+                        strength: strength,
+                        cardType: cardType,
+                        baseValue: baseValue,
+                        phone: phone,
+                        imageUrl: imageUrl,
+                        status: 'Available',
+                        soldTo: '-'
+                    };
+                });
+
+                // Insert into Database
+                await Player.insertMany(playersToInsert);
+                
+                // Refresh all connected screens
+                const allPlayers = await Player.find();
+                io.emit('updatePlayers', allPlayers);
+                
+                res.send({ message: `✅ Successfully imported ${playersToInsert.length} players!` });
+            });
+    } catch (err) {
+        res.status(500).send({ message: "Import failed: " + err.message });
+    }
+});
 
 // --- SOCKETS ---
 io.on('connection', async (socket) => {
