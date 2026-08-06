@@ -524,6 +524,41 @@ socket.on('hardResetDatabase', async () => {
         socket.emit('errorMsg', "Reset failed: " + err.message);
     }
 });
+    // --- MARK PLAYER AS UNSOLD ---
+socket.on('markUnsold', async () => {
+    if (auctionState.activePlayerId) {
+        const player = auctionState.activePlayerId;
+        
+        // 1. Update Player status in DB
+        await Player.findByIdAndUpdate(player._id, { 
+            status: 'Unsold', 
+            soldTo: 'UNSOLD' 
+        });
+
+        // 2. Clear the timer
+        clearInterval(timerInterval);
+
+        // 3. Reset Auction State
+        auctionState = { 
+            activePlayerId: null, 
+            currentBid: 0, 
+            highestBidder: 'No Bids Yet', 
+            timeLeft: 0,
+            skippedTeams: [],
+            isFinalCall: false,
+            finalCallText: ""
+        };
+
+        // 4. Broadcast updates
+        io.emit('updatePlayers', await Player.find());
+        io.emit('updateAuction', auctionState);
+        io.emit('newMessage', { 
+            sender: "SYSTEM", 
+            role: "admin", 
+            text: `❌ UNSOLD: ${player.name} has been moved to the unsold list.` 
+        });
+    }
+});
     // Add this inside your io.on('connection', ...) block
 socket.on('updatePlayerImage', async ({ playerId, imageUrl }) => {
     try {
