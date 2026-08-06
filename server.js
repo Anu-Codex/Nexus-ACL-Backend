@@ -427,15 +427,6 @@ socket.on('deductPurse', async ({ teamName, amount }) => {
         socket.emit('errorMsg', "Force deduction failed.");
     }
 });
-    socket.on('updatePlayers', (p) => { 
-    currentPlayers = p; 
-    // Re-apply filter if user is currently searching
-    if (currentSearchTerm) {
-        filterPlayers();
-    } else {
-        renderPlayers(p);
-    }
-});
     // --- ADMIN TEAM/FRANCHISE MANAGEMENT ---
 
 // 1. Create a New Team
