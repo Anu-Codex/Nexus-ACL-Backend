@@ -67,19 +67,24 @@ async function sendOTPEmail(email, otp) {
 
 
 // Add this temporary seeding logic at the bottom of server.js
+// --- FORCE RESET MASTER ADMIN ---
 async function createMasterAdmin() {
-    const exists = await User.findOne({ email: "sarkaranubhav48@gmail.com" });
-    if (!exists) {
-        const hashedPassword = await bcrypt.hash("admin123", 10);
-        await User.create({
+    const adminEmail = "sarkaranubhav48@gmail.com";
+    const hashedPassword = await bcrypt.hash("admin123", 10);
+    
+    // findOneAndUpdate with upsert: true will create it if missing OR update if exists
+    await User.findOneAndUpdate(
+        { email: adminEmail },
+        {
             name: "Nexus Master Admin",
-            email: "sarkaranubhav48@gmail.com",
+            email: adminEmail,
             password: hashedPassword,
             role: "admin",
             isVerified: true
-        });
-        console.log("👑 Master Admin Account Created.");
-    }
+        },
+        { upsert: true, new: true }
+    );
+    console.log("👑 Master Admin Account Synced (Pass: admin123)");
 }
 createMasterAdmin();
 
@@ -187,19 +192,20 @@ io.on('connection', async (socket) => {
     // 2. Special Sign In (Captain/Admin)
     socket.on('specialSignIn', async ({ email, password, type }) => {
     try {
-        const user = await User.findOne({ email, role: type });
+        // Force email to lowercase
+        const cleanEmail = email.trim().toLowerCase();
+        const user = await User.findOne({ email: cleanEmail, role: type });
         
         if (!user) return socket.emit('errorMsg', "User not found in authorized list.");
 
-        // Compare entered password with hashed password in DB
         const isMatch = await bcrypt.compare(password, user.password);
         
         if (isMatch) {
             const otp = Math.floor(100000 + Math.random() * 900000).toString();
             user.otp = otp;
-            user.otpExpires = Date.now() + 600000; // 10 mins
+            user.otpExpires = Date.now() + 600000;
             await user.save();
-            await sendOTPEmail(email, otp);
+            await sendOTPEmail(cleanEmail, otp);
             socket.emit('authStep', 'otp_verify');
         } else {
             socket.emit('errorMsg', "Incorrect Password.");
