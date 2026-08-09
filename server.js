@@ -199,23 +199,36 @@ async function autoSellPlayer() {
     }
 }
 async function broadcastStats() {
-    const players = await Player.find();
-    const stats = {
-        total: players.length,
-        sold: players.filter(p => p.status === 'Sold').length,
-        unsold: players.filter(p => p.status === 'Unsold').length,
-        tiers: {
-            bigtime: players.filter(p => p.cardType === 'BIG TIME').length,
-            epic: players.filter(p => p.cardType === 'EPIC').length,
-            showtime: players.filter(p => p.cardType === 'SHOWTIME').length,
-            highlight: players.filter(p => p.cardType === 'HIGHLIGHT').length
-        }
-    };
-    io.emit('updateGlobalStats', stats);
+    try {
+        const players = await Player.find();
+        
+        // Helper to count tiers regardless of CAPS/lowercase
+        const countTier = (tierName) => players.filter(p => 
+            p.cardType && p.cardType.toLowerCase() === tierName.toLowerCase()
+        ).length;
+
+        const stats = {
+            total: players.length,
+            sold: players.filter(p => p.status === 'Sold').length,
+            unsold: players.filter(p => p.status === 'Unsold').length,
+            tiers: {
+                bigtime: countTier('BIG TIME'),
+                epic: countTier('EPIC'),
+                showtime: countTier('SHOWTIME'),
+                highlight: countTier('HIGHLIGHT')
+            }
+        };
+
+        console.log("📊 Broadcasting Updated Stats:", stats);
+        io.emit('updateGlobalStats', stats);
+    } catch (err) {
+        console.error("Stats Error:", err);
+    }
 }
 
 // --- SOCKETS ---
 io.on('connection', async (socket) => {
+    broadcastStats(); 
     socket.emit('initialData', {
         players: await Player.find(),
         teams: await Team.find(),
