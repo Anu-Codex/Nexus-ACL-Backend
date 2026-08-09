@@ -644,6 +644,11 @@ socket.on('clearOnlyPlayers', async () => {
             io.emit('updateSlideshow', slideshowState);
         }
     });
+    // Inside io.on('connection', (socket) => { ... })
+socket.on('sendReaction', (emoji) => {
+    // Relay to everyone including the sender
+    io.emit('newReaction', emoji);
+});
     socket.on('bulkAddPlayers', async (playersArray) => {
     try {
         // Insert all players at once
