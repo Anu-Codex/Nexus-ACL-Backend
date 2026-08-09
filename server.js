@@ -157,22 +157,27 @@ async function autoSellPlayer() {
     if (auctionState.activePlayerId && auctionState.highestBidder !== 'No Bids Yet') {
         const price = auctionState.currentBid;
         const teamName = auctionState.highestBidder;
+        const player = auctionState.activePlayerId;
 
-        await Player.findByIdAndUpdate(auctionState.activePlayerId._id, {
+        await Player.findByIdAndUpdate(player._id, {
             status: 'Sold',
             soldTo: `${teamName} (${price}M)`
         });
         await Team.findOneAndUpdate({ name: teamName }, { $inc: { budget: -price } });
+
+        // --- NEW BROADCAST EVENT ---
+        io.emit('celebrateSold', {
+            player: player,
+            teamName: teamName,
+            price: price
+        });
 
         auctionState = { activePlayerId: null, currentBid: 0, highestBidder: 'No Bids Yet', timeLeft: 0 };
         
         io.emit('updatePlayers', await Player.find());
         io.emit('updateTeams', await Team.find());
         io.emit('updateAuction', auctionState);
-        io.emit('newMessage', { sender: "SYSTEM", role: "admin", text: `🔴 SOLD! ${teamName} bought the player for ${price}L.` });
-    } else {
-        auctionState = { activePlayerId: null, currentBid: 0, highestBidder: 'No Bids Yet', timeLeft: 0 };
-        io.emit('updateAuction', auctionState);
+        io.emit('newMessage', { sender: "SYSTEM", role: "admin", text: `🔴 SOLD! ${teamName} bought ${player.name} for ${price}M.` });
     }
 }
 
