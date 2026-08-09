@@ -211,25 +211,40 @@ io.on('connection', async (socket) => {
     // 2. Special Sign In (Captain/Admin)
     socket.on('specialSignIn', async ({ email, password, type }) => {
     try {
-        // Force email to lowercase
+        // 1. Clean the inputs (remove spaces and force lowercase)
         const cleanEmail = email.trim().toLowerCase();
-        const user = await User.findOne({ email: cleanEmail, role: type });
-        
-        if (!user) return socket.emit('errorMsg', "User not found in authorized list.");
+        const cleanRole = type.trim().toLowerCase();
 
+        console.log(`Attempting login: ${cleanEmail} as ${cleanRole}`);
+
+        // 2. Find the user matching BOTH email and role
+        const user = await User.findOne({ 
+            email: cleanEmail, 
+            role: cleanRole 
+        });
+        
+        if (!user) {
+            console.log("Login Failed: User/Role combination not found.");
+            return socket.emit('errorMsg', "Not Authorized: Account not found for this role.");
+        }
+
+        // 3. Check password
         const isMatch = await bcrypt.compare(password, user.password);
         
         if (isMatch) {
             const otp = Math.floor(100000 + Math.random() * 900000).toString();
             user.otp = otp;
-            user.otpExpires = Date.now() + 600000;
+            user.otpExpires = Date.now() + 600000; 
             await user.save();
             await sendOTPEmail(cleanEmail, otp);
             socket.emit('authStep', 'otp_verify');
         } else {
             socket.emit('errorMsg', "Incorrect Password.");
         }
-    } catch (e) { socket.emit('errorMsg', "Auth Error"); }
+    } catch (e) { 
+        console.error(e);
+        socket.emit('errorMsg', "Auth Error: Please try again."); 
+    }
 });
     socket.on('guestSignIn', () => {
     // Directly succeed without checking any password
@@ -246,22 +261,24 @@ socket.on('getAuthorizedUsers', async () => {
 socket.on('createNewUser', async (data) => {
     try {
         const hashedPassword = await bcrypt.hash(data.password, 10);
-        const userEmail = data.email.trim().toLowerCase();
+        const userEmail = data.email.trim().toLowerCase(); // Clean email
         const teamName = data.teamName.trim();
-        const customBudget = Number(data.budget) || 2000; // Use input or default to 2000
+        const userRole = data.role.trim().toLowerCase(); // Clean role
+        const customBudget = Number(data.budget) || 2000;
 
-        // Create/Update the User in DB
         await User.findOneAndUpdate(
             { email: userEmail },
             {
                 name: teamName, 
                 email: userEmail,
                 password: hashedPassword,
-                role: data.role,
+                role: userRole, // Save as lowercase
                 isVerified: true
             },
             { upsert: true }
         );
+        
+        // ... rest of the code (Team update etc)
 
         // Link to Franchise if role is captain
         if (data.role === 'captain') {
