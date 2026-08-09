@@ -41,7 +41,7 @@ const playerSchema = new mongoose.Schema({
 const teamSchema = new mongoose.Schema({ 
     name: String, 
     budget: Number,
-    maxCapacity: { type: Number, default: 15 } // Default to 15
+    maxCapacity: { type: Number, default: 10 } // Default to 15
 });
 
 const chatSchema = new mongoose.Schema({ 
@@ -195,6 +195,7 @@ async function autoSellPlayer() {
         io.emit('updatePlayers', await Player.find());
         io.emit('updateTeams', await Team.find());
         io.emit('updateAuction', auctionState);
+        await broadcastStats();
         io.emit('newMessage', { sender: "SYSTEM", role: "admin", text: `🔴 SOLD! ${teamName} bought ${player.name} for ${price}M.` });
     }
 }
@@ -393,6 +394,7 @@ socket.on('createNewTeam', async ({ name, budget }) => {
             imageUrl: data.imageUrl  
             });
             await newPlayer.save();
+            await broadcastStats();
             io.emit('updatePlayers', await Player.find()); 
         } catch (err) { console.error(err); }
     });
@@ -437,6 +439,7 @@ socket.on('createNewTeam', async ({ name, budget }) => {
 });
     socket.on('setTeamCapacity', async ({ teamId, capacity }) => {
     await Team.findByIdAndUpdate(teamId, { maxCapacity: Number(capacity) });
+    await broadcastStats();
     io.emit('updateTeams', await Team.find());
     socket.emit('newMessage', { sender: "SYSTEM", text: "✅ Capacity Updated." });
 });
@@ -581,6 +584,7 @@ socket.on('deleteTeam', async (id) => {
 
     socket.on('deletePlayer', async (playerId) => {
         await Player.findByIdAndDelete(playerId);
+        await broadcastStats();
         io.emit('updatePlayers', await Player.find()); 
     });
     // --- MEGA RESET (ADMIN ONLY) ---
@@ -653,6 +657,7 @@ socket.on('markUnsold', async () => {
         // 4. Broadcast updates
         io.emit('updatePlayers', await Player.find());
         io.emit('updateAuction', auctionState);
+        await broadcastStats();
         io.emit('newMessage', { 
             sender: "SYSTEM", 
             role: "admin", 
@@ -682,6 +687,7 @@ socket.on('clearOnlyPlayers', async () => {
         // 3. Broadcast updates to all screens
         io.emit('updatePlayers', []);
         io.emit('updateAuction', auctionState);
+        await broadcastStats();
         
         // 4. Send a system message to the chat
         io.emit('newMessage', { 
@@ -726,6 +732,7 @@ socket.on('sendReaction', (emoji) => {
     try {
         // Insert all players at once
         await Player.insertMany(playersArray);
+        await broadcastStats();
         
         // Refresh the list for everyone
         const allPlayers = await Player.find();
