@@ -206,13 +206,9 @@ io.on('connection', async (socket) => {
         }
     } catch (e) { socket.emit('errorMsg', "Auth Error"); }
 });
-    socket.on('guestSignIn', (data) => {
-    const GUEST_PASSWORD = "Auc@Nexus"; // Set your guest password
-    if(data.password === GUEST_PASSWORD) {
-        socket.emit('guestLoginSuccess', { name: "Guest Viewer", role: "guest" });
-    } else {
-        socket.emit('errorMsg', "Invalid Guest Password");
-    }
+    socket.on('guestSignIn', () => {
+    // Directly succeed without checking any password
+    socket.emit('guestLoginSuccess', { name: "Guest Viewer", role: "guest" });
 });
 
 // --- ADMIN MANAGEMENT FUNCTIONS ---
