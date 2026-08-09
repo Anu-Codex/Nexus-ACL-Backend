@@ -582,6 +582,42 @@ socket.on('markUnsold', async () => {
         });
     }
 });
+    // --- DELETE ONLY PLAYERS (ADMIN ONLY) ---
+socket.on('clearOnlyPlayers', async () => {
+    try {
+        console.log("🚨 ROSTER CLEAR INITIATED");
+
+        // 1. Delete all records from the Player collection only
+        await Player.deleteMany({});
+
+        // 2. Reset the live auction state (to prevent errors if a player was live)
+        auctionState = { 
+            activePlayerId: null, 
+            currentBid: 0, 
+            highestBidder: 'No Bids Yet', 
+            timeLeft: 60,
+            skippedTeams: [],
+            isFinalCall: false,
+            finalCallText: ""
+        };
+
+        // 3. Broadcast updates to all screens
+        io.emit('updatePlayers', []);
+        io.emit('updateAuction', auctionState);
+        
+        // 4. Send a system message to the chat
+        io.emit('newMessage', { 
+            sender: "SYSTEM", 
+            role: "admin", 
+            text: "🚨 ADMIN ALERT: The player roster has been cleared. Teams and Accounts remain active." 
+        });
+
+        socket.emit('newMessage', { sender: "SYSTEM", text: "✅ Roster cleared successfully." });
+    } catch (err) {
+        console.error(err);
+        socket.emit('errorMsg', "Failed to clear players.");
+    }
+});
     // --- SLIDESHOW LOGIC ---
     socket.on('toggleSlideshow', async (shouldStart) => {
         if (shouldStart) {
