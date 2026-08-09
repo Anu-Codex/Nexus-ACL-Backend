@@ -109,7 +109,7 @@ let auctionState = {
     activePlayerId: null, 
     currentBid: 0, 
     highestBidder: 'No Bids Yet', 
-    timeLeft: 120,
+    timeLeft: 60,
     skippedTeams: [],
     isFinalCall: false,     // NEW
     finalCallText: ""
@@ -136,7 +136,7 @@ function getFinalCallText(seconds) {
 function startTimer() {
     clearInterval(timerInterval);
     // If it's a final call, we start from 30, otherwise standard 60 (or 120 as you mentioned)
-    auctionState.timeLeft = auctionState.isFinalCall ? 30 : 120; 
+    auctionState.timeLeft = auctionState.isFinalCall ? 30 : 60; 
     
     timerInterval = setInterval(async () => {
         auctionState.timeLeft--;
@@ -530,7 +530,7 @@ socket.on('hardResetDatabase', async () => {
             activePlayerId: null, 
             currentBid: 0, 
             highestBidder: 'No Bids Yet', 
-            timeLeft: 120,
+            timeLeft: 60,
             skippedTeams: [],
             isFinalCall: false,
             finalCallText: ""
