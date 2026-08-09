@@ -702,6 +702,20 @@ socket.on('clearOnlyPlayers', async () => {
         socket.emit('errorMsg', "Failed to clear players.");
     }
 });
+    // --- PUBLIC RELAY (ZERO MONGODB USAGE) ---
+socket.on('public_msg_send', (data) => {
+    // This event does NOT call Chat.save() or Chat.create()
+    // It is physically impossible to crash the DB with this
+    io.emit('public_msg_receive', {
+        sender: data.sender,
+        text: data.text
+    });
+});
+    // --- PUBLIC REACTION RELAY (ZERO DB PRESSURE) ---
+socket.on('public_reaction_send', (emoji) => {
+    // Immediate broadcast to everyone
+    io.emit('public_reaction_receive', emoji);
+});
     // --- SLIDESHOW LOGIC ---
     socket.on('toggleSlideshow', async (shouldStart) => {
         if (shouldStart) {
