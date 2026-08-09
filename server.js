@@ -55,9 +55,23 @@ const Chat = mongoose.model('Chat', chatSchema);
 // --- AUTH UTILITIES ---
 async function sendOTPEmail(email, otp) {
     const sendSmtpEmail = new SibApiV3Sdk.SendSmtpEmail();
-    sendSmtpEmail.subject = "PITCH KINGS FC Verification Code";
-    sendSmtpEmail.htmlContent = `<html><body><h1>Your OTP: ${otp}</h1><p>Use this code to verify your account.</p></body></html>`;
-    sendSmtpEmail.sender = { "name": "PITCH KINGS FC", "email": process.env.BREVO_SENDER_EMAIL };
+    
+    sendSmtpEmail.subject = `🔑 ${otp} is your NEXUS LEGENDS Access Code`;
+    
+    sendSmtpEmail.htmlContent = `
+        <div style="font-family: Arial, sans-serif; background-color: #0a0f16; color: #ffffff; padding: 40px; text-align: center; border-radius: 20px;">
+            <h1 style="color: #00e5ff; margin-bottom: 10px;">NEXUS LEGENDS</h1>
+            <p style="color: #64748b; font-size: 14px; text-transform: uppercase; letter-spacing: 2px;">Identity Verification</p>
+            <hr style="border: 0; border-top: 1px solid #1e293b; margin: 20px 0;">
+            <p style="font-size: 16px;">Use the following code to access the Auction Arena:</p>
+            <div style="background: #1e293b; padding: 20px; border-radius: 10px; display: inline-block; margin: 20px 0;">
+                <span style="font-size: 32px; font-weight: bold; letter-spacing: 10px; color: #eaff00;">${otp}</span>
+            </div>
+            <p style="color: #64748b; font-size: 12px; margin-top: 20px;">This code will expire in 10 minutes. If you did not request this, please ignore this email.</p>
+        </div>
+    `;
+    
+    sendSmtpEmail.sender = { "name": "NEXUS LEGENDS ARENA", "email": process.env.BREVO_SENDER_EMAIL };
     sendSmtpEmail.to = [{ "email": email }];
     return apiInstance.sendTransacEmail(sendSmtpEmail);
 }
