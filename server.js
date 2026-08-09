@@ -38,7 +38,11 @@ const playerSchema = new mongoose.Schema({
     status: { type: String, default: 'Available' }, soldTo: { type: String, default: '-' }
 });
 
-const teamSchema = new mongoose.Schema({ name: String, budget: Number });
+const teamSchema = new mongoose.Schema({ 
+    name: String, 
+    budget: Number,
+    maxCapacity: { type: Number, default: 15 } // Default to 15
+});
 
 const chatSchema = new mongoose.Schema({ 
     sender: String, role: String, text: String, timestamp: { type: Date, default: Date.now } 
@@ -193,6 +197,21 @@ async function autoSellPlayer() {
         io.emit('updateAuction', auctionState);
         io.emit('newMessage', { sender: "SYSTEM", role: "admin", text: `🔴 SOLD! ${teamName} bought ${player.name} for ${price}M.` });
     }
+}
+async function broadcastStats() {
+    const players = await Player.find();
+    const stats = {
+        total: players.length,
+        sold: players.filter(p => p.status === 'Sold').length,
+        unsold: players.filter(p => p.status === 'Unsold').length,
+        tiers: {
+            bigtime: players.filter(p => p.cardType === 'BIG TIME').length,
+            epic: players.filter(p => p.cardType === 'EPIC').length,
+            showtime: players.filter(p => p.cardType === 'SHOWTIME').length,
+            highlight: players.filter(p => p.cardType === 'HIGHLIGHT').length
+        }
+    };
+    io.emit('updateGlobalStats', stats);
 }
 
 // --- SOCKETS ---
@@ -403,6 +422,11 @@ socket.on('createNewTeam', async ({ name, budget }) => {
         io.emit('newMessage', { sender: "SYSTEM", role: "admin", text: "⚠️ ADMIN HAS INITIATED THE FINAL CALL!" });
     }
 });
+    socket.on('setTeamCapacity', async ({ teamId, capacity }) => {
+    await Team.findByIdAndUpdate(teamId, { maxCapacity: Number(capacity) });
+    io.emit('updateTeams', await Team.find());
+    socket.emit('newMessage', { sender: "SYSTEM", text: "✅ Capacity Updated." });
+});
 
     socket.on('placeBid', async ({ teamName, increment }) => {
     // 1. Check if they already skipped
@@ -416,6 +440,11 @@ socket.on('createNewTeam', async ({ name, budget }) => {
     }
 
     const team = await Team.findOne({ name: teamName });
+    const playerCount = await Player.countDocuments({ soldTo: new RegExp('^' + teamName) });
+
+    if (playerCount >= team.maxCapacity) {
+        return socket.emit('errorMsg', `🚫 SQUAD FULL! Limit is ${team.maxCapacity}.`);
+    }
     const newBid = auctionState.currentBid + increment;
 
     if (team && team.budget >= newBid) {
