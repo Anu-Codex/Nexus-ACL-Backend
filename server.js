@@ -41,6 +41,7 @@ const playerSchema = new mongoose.Schema({
 const teamSchema = new mongoose.Schema({ 
     name: String, 
     budget: Number,
+    initialBudget: Number,
     maxCapacity: { type: Number, default: 10 } // Default to 15
 });
 
@@ -317,7 +318,7 @@ socket.on('createNewUser', async (data) => {
         if (data.role === 'captain') {
             await Team.findOneAndUpdate(
                 { name: teamName },
-                { name: teamName, budget: customBudget },
+                { name: teamName, budget: customBudget, initialBudget: customBudget },
                 { upsert: true }
             );
         }
@@ -343,7 +344,7 @@ socket.on('createNewTeam', async ({ name, budget }) => {
 
         await Team.findOneAndUpdate(
             { name: teamName },
-            { name: teamName, budget: teamBudget },
+            { name: teamName, budget: teamBudget, initialBudget: customBudget },
             { upsert: true }
         );
 
@@ -564,6 +565,23 @@ socket.on('deleteTeam', async (id) => {
     } catch (err) {
         socket.emit('errorMsg', "Failed to delete team.");
     }
+});
+    socket.on('resetPurse', async ({ teamName }) => {
+    try {
+        const team = await Team.findOne({ name: teamName });
+        if (team) {
+            // Revert current budget to the initial value
+            team.budget = team.initialBudget;
+            await team.save();
+            
+            io.emit('updateTeams', await Team.find());
+            io.emit('newMessage', { 
+                sender: "SYSTEM", 
+                role: "admin", 
+                text: `♻️ RESET: ${teamName} purse reverted to original ${team.initialBudget}M.` 
+            });
+        }
+    } catch (err) { console.error(err); }
 });
 
     socket.on('sendMessage', async (data) => {
