@@ -403,22 +403,21 @@ socket.on('createNewTeam', async ({ name, budget }) => {
         } catch (err) { console.error(err); }
     });
 
-    socket.on('startAuction', async ({ playerId, baseValue }) => {
+    // Add 'isHidden' to the arguments list here:
+socket.on('startAuction', async ({ playerId, baseValue, isHidden }) => { 
     const player = await Player.findById(playerId);
     if (player) {
-        // --- ADD THIS LINE ---
-        // Reset status so an 'Unsold' player becomes 'Available' again during bidding
         await Player.findByIdAndUpdate(playerId, { status: 'Available', soldTo: '-' });
-        
         auctionState = { 
             activePlayerId: player, 
             currentBid: baseValue, 
             highestBidder: 'No Bids Yet', 
             timeLeft: 60,
             skippedTeams: [],
-            isHidden: isHidden || false
+            isFinalCall: false,
+            finalCallText: "",
+            isHidden: isHidden || false // Now it knows what isHidden is!
         };
-        
         // Broadcast the status reset to the list
         io.emit('updatePlayers', await Player.find());
         io.emit('updateAuction', auctionState);
@@ -431,6 +430,7 @@ socket.on('createNewTeam', async ({ name, budget }) => {
         });
         
         startTimer();
+        await broadcastStats();
     }
 });
 
