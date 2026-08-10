@@ -132,7 +132,9 @@ let auctionState = {
     timeLeft: 60,
     skippedTeams: [],
     isFinalCall: false,     // NEW
-    finalCallText: ""
+    finalCallText: "",
+    isHidden: false
+
 
 };
 let timerInterval = null;
@@ -413,7 +415,8 @@ socket.on('createNewTeam', async ({ name, budget }) => {
             currentBid: baseValue, 
             highestBidder: 'No Bids Yet', 
             timeLeft: 60,
-            skippedTeams: [] 
+            skippedTeams: [],
+            isHidden: isHidden || false
         };
         
         // Broadcast the status reset to the list
@@ -444,6 +447,11 @@ socket.on('createNewTeam', async ({ name, budget }) => {
     await broadcastStats();
     io.emit('updateTeams', await Team.find());
     socket.emit('newMessage', { sender: "SYSTEM", text: "✅ Capacity Updated." });
+});
+    socket.on('revealPlayer', () => {
+    auctionState.isHidden = false; // Reveal the player
+    io.emit('updateAuction', auctionState);
+    io.emit('newMessage', { sender: "SYSTEM", role: "admin", text: "🔓 MYSTERY REVEALED: A Legend has entered the block!" });
 });
 
     socket.on('placeBid', async ({ teamName, increment }) => {
