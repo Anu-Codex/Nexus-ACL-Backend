@@ -410,7 +410,7 @@ socket.on('createNewTeam', async ({ name, budget }) => {
 
         await Team.findOneAndUpdate(
             { name: teamName },
-            { name: teamName, budget: teamBudget, initialBudget: customBudget },
+            { name: teamName, budget: teamBudget, initialBudget: teamBudget },
             { upsert: true }
         );
 
