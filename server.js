@@ -225,8 +225,7 @@ async function autoSellPlayer() {
         });
         await Team.findOneAndUpdate({ name: teamName }, { $inc: { budget: -price } });
         await History.create({ playerName: player.name, price: price });
-        await mongoose.model('History').create({ playerName: player.name, price: price });
-
+        
         // --- NEW BROADCAST EVENT ---
         io.emit('celebrateSold', {
             player: player,
@@ -242,6 +241,24 @@ async function autoSellPlayer() {
         await broadcastStats();
         io.emit('newMessage', { sender: "SYSTEM", role: "admin", text: `🔴 SOLD! ${teamName} bought ${player.name} for ${price}M.` });
     }
+}
+async function getStatsObject() {
+    const players = await Player.find();
+    const countTier = (tierName) => players.filter(p => 
+        p.cardType && p.cardType.toLowerCase() === tierName.toLowerCase()
+    ).length;
+
+    return {
+        total: players.length,
+        sold: players.filter(p => p.status === 'Sold').length,
+        unsold: players.filter(p => p.status === 'Unsold').length,
+        tiers: {
+            bigtime: countTier('BIG TIME'),
+            epic: countTier('EPIC'),
+            showtime: countTier('SHOWTIME'),
+            highlight: countTier('HIGHLIGHT')
+        }
+    };
 }
 async function broadcastStats() {
     try {
