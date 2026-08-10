@@ -532,6 +532,42 @@ socket.on('deductPurse', async ({ teamName, amount }) => {
         socket.emit('errorMsg', "Force deduction failed.");
     }
 });
+    // --- REDUCE SQUAD COUNT (RELEASE PLAYERS) ---
+socket.on('reduceSquadCount', async ({ teamName, count }) => {
+    try {
+        // 1. Find the players sold to this team (limit by the number typed)
+        // We sort by _id descending to remove the most recently bought players first
+        const playersToRelease = await Player.find({ 
+            soldTo: { $regex: new RegExp('^' + teamName) } 
+        }).sort({ _id: -1 }).limit(Number(count));
+
+        if (playersToRelease.length === 0) {
+            return socket.emit('errorMsg', `Team ${teamName} has no players to release.`);
+        }
+
+        // 2. Loop through and reset them
+        for (let p of playersToRelease) {
+            await Player.findByIdAndUpdate(p._id, { 
+                status: 'Available', 
+                soldTo: '-' 
+            });
+        }
+
+        // 3. Sync everything
+        io.emit('updatePlayers', await Player.find());
+        io.emit('updateTeams', await Team.find());
+        await broadcastStats(); 
+        
+        io.emit('newMessage', { 
+            sender: "SYSTEM", 
+            role: "admin", 
+            text: `🔓 RELEASE: ${playersToRelease.length} player(s) removed from ${teamName}'s squad.` 
+        });
+    } catch (err) {
+        console.error(err);
+        socket.emit('errorMsg', "Failed to release players.");
+    }
+});
     // --- ADMIN TEAM/FRANCHISE MANAGEMENT ---
 
 // 1. Create a New Team
