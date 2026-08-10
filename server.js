@@ -138,6 +138,9 @@ let auctionState = {
 
 };
 let timerInterval = null;
+   // --- FEATURE 1: GHOST WATCH TRACKING ---
+let focusedCaptains = new Set(); // Stores Socket IDs of focused captains
+
 let slideshowState = {
     active: false,
     currentIndex: 0,
@@ -768,6 +771,23 @@ socket.on('clearOnlyPlayers', async () => {
         console.error(err);
         socket.emit('errorMsg', "Failed to clear players.");
     }
+});
+
+socket.on('updateFocus', (isFocused) => {
+    // We only care if the user is a captain
+    if (isFocused) {
+        focusedCaptains.add(socket.id);
+    } else {
+        focusedCaptains.delete(socket.id);
+    }
+    // Broadcast the COUNT of focused captains to everyone
+    io.emit('ghostWatchCount', focusedCaptains.size);
+});
+
+// Ensure they are removed if they disconnect
+socket.on('disconnect', () => {
+    focusedCaptains.delete(socket.id);
+    io.emit('ghostWatchCount', focusedCaptains.size);
 });
     // --- PUBLIC RELAY (ZERO MONGODB USAGE) ---
 socket.on('public_msg_send', (data) => {
