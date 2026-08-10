@@ -54,6 +54,41 @@ const User = mongoose.model('User', userSchema);
 const Player = mongoose.model('Player', playerSchema);
 const Team = mongoose.model('Team', teamSchema);
 const Chat = mongoose.model('Chat', chatSchema);
+// 1. Define the History Schema (If not already added)
+const historySchema = new mongoose.Schema({
+    playerName: String,
+    price: Number,
+    timestamp: { type: Date, default: Date.now }
+});
+const History = mongoose.model('History', historySchema);
+
+// 2. THE SAFETY SYNC FUNCTION (Prevents data loss)
+async function syncPastSalesToGraph() {
+    console.log("🔍 Checking for unsynced past sales...");
+    const soldPlayers = await Player.find({ status: 'Sold' });
+    
+    for (let p of soldPlayers) {
+        // Extract price from "Team Name (150M)" format using Regex
+        const priceMatch = p.soldTo.match(/\((\d+)M\)/);
+        const priceValue = priceMatch ? parseInt(priceMatch[1]) : 0;
+
+        // Check if this player is already in History to avoid duplicates
+        const alreadyInHistory = await History.findOne({ playerName: p.name });
+        
+        if (!alreadyInHistory && priceValue > 0) {
+            await History.create({ 
+                playerName: p.name, 
+                price: priceValue,
+                timestamp: new Date() // Approximate time
+            });
+            console.log(`✅ Recovered Graph Data for: ${p.name}`);
+        }
+    }
+    console.log("📊 Graph History is now fully synced with Database.");
+}
+
+// Run the sync every time the server starts
+syncPastSalesToGraph();
 
 // --- HARDCODED CREDENTIALS (As requested) ---
 
@@ -189,6 +224,8 @@ async function autoSellPlayer() {
             soldTo: `${teamName} (${price}M)`
         });
         await Team.findOneAndUpdate({ name: teamName }, { $inc: { budget: -price } });
+        await History.create({ playerName: player.name, price: price });
+        await mongoose.model('History').create({ playerName: player.name, price: price });
 
         // --- NEW BROADCAST EVENT ---
         io.emit('celebrateSold', {
@@ -236,13 +273,19 @@ async function broadcastStats() {
 
 // --- SOCKETS ---
 io.on('connection', async (socket) => {
-    broadcastStats(); 
+    const [players, teams, chats, stats, history] = await Promise.all([
+        Player.find(),
+        Team.find(),
+        Chat.find().sort({ timestamp: 1 }).limit(50),
+        getStatsObject(),
+        History.find().sort({ timestamp: 1 }).limit(30) // Get last 20 sales
+    ]);
+
     socket.emit('initialData', {
-        players: await Player.find(),
-        teams: await Team.find(),
-        chats: await Chat.find().sort({ timestamp: 1 }).limit(50),
-        state: auctionState
+        players, teams, chats, state: auctionState, stats,
+        history: history // Include this for the graph
     });
+});
 
     // --- NEW: AUTHENTICATION EVENTS ---
 
