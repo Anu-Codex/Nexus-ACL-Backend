@@ -919,6 +919,5 @@ socket.on('updatePlayerImage', async ({ playerId, imageUrl }) => {
         socket.emit('errorMsg', "Failed to update image");
     }
 });
-});
 
 server.listen(process.env.PORT || 3000, () => console.log("Server Running"));
