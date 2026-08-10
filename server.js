@@ -273,13 +273,19 @@ async function broadcastStats() {
 
 // --- SOCKETS ---
 io.on('connection', async (socket) => {
-    const [players, teams, chats, stats, history] = await Promise.all([
-        Player.find(),
-        Team.find(),
-        Chat.find().sort({ timestamp: 1 }).limit(50),
-        getStatsObject(),
-        History.find().sort({ timestamp: 1 }).limit(30) // Get last 20 sales
-    ]);
+    // Fetch last 20 sales for the graph
+    const history = await History.find().sort({ timestamp: 1 }).limit(20);
+
+    socket.emit('initialData', {
+        players: await Player.find(),
+        teams: await Team.find(),
+        chats: await Chat.find().sort({ timestamp: 1 }).limit(50),
+        state: auctionState,
+        // --- SEND THE SAVED HISTORY HERE ---
+        history: history 
+    });
+    
+    // ... rest of logic
 
     socket.emit('initialData', {
         players, teams, chats, state: auctionState, stats,
