@@ -42,7 +42,8 @@ const teamSchema = new mongoose.Schema({
     name: String, 
     budget: Number,
     initialBudget: Number,
-    maxCapacity: { type: Number, default: 10 } // Default to 15
+    maxCapacity: { type: Number, default: 10 }, // Default to 15
+    logoUrl: { type: String, default: "" }
 });
 
 const chatSchema = new mongoose.Schema({ 
@@ -567,6 +568,10 @@ socket.on('reduceSquadCount', async ({ teamName, count }) => {
         console.error(err);
         socket.emit('errorMsg', "Failed to release players.");
     }
+});
+    socket.on('updateTeamLogo', async ({ teamId, logoUrl }) => {
+    await Team.findByIdAndUpdate(teamId, { logoUrl: logoUrl });
+    io.emit('updateTeams', await Team.find());
 });
     // --- ADMIN TEAM/FRANCHISE MANAGEMENT ---
 
