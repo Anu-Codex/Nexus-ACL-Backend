@@ -13,6 +13,8 @@ app.use(cors({
     methods: ["GET", "POST"],
     allowedHeaders: ["Content-Type", "x-api-key"] // This allows the security key to pass through
 }));
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: "*" } });
 
 mongoose.connect(process.env.MONGO_URI).then(() => console.log("✅ Connected to MongoDB"));
 
