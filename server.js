@@ -8,9 +8,11 @@ const SibApiV3Sdk = require('sib-api-v3-sdk');
 const bcrypt = require('bcryptjs');
 
 const app = express();
-app.use(cors());
-const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
+app.use(cors({
+    origin: ["https://pes-park-official.vercel.app", "http://localhost:3000"], // Your Community site URL
+    methods: ["GET", "POST"],
+    allowedHeaders: ["Content-Type", "x-api-key"] // This allows the security key to pass through
+}));
 
 mongoose.connect(process.env.MONGO_URI).then(() => console.log("✅ Connected to MongoDB"));
 
@@ -164,7 +166,7 @@ let auctionState = {
     activePlayerId: null, 
     currentBid: 0, 
     highestBidder: 'No Bids Yet', 
-    timeLeft: 60,
+    timeLeft: 20,
     skippedTeams: [],
     isFinalCall: false,     // NEW
     finalCallText: "",
@@ -184,11 +186,11 @@ let slideshowState = {
 let slideshowInterval = null;
 
 function getFinalCallText(seconds) {
-    if (seconds > 25) return "Are there any further bids?";
-    if (seconds > 20) return "For the first time...";
-    if (seconds > 15) return "For the second time...";
-    if (seconds > 10) return "Going once...";
-    if (seconds > 5) return "Going twice...";
+    if (seconds > 15) return "Are there any further bids?";
+    if (seconds > 10) return "For the first time...";
+    if (seconds > 5) return "For the second time...";
+    if (seconds > 3) return "Going once...";
+    if (seconds > 2) return "Going twice...";
     if (seconds > 0) return "SOLD!";
     return "SOLD!";
 }
@@ -196,7 +198,7 @@ function getFinalCallText(seconds) {
 function startTimer() {
     clearInterval(timerInterval);
     // If it's a final call, we start from 30, otherwise standard 60 (or 120 as you mentioned)
-    auctionState.timeLeft = auctionState.isFinalCall ? 30 : 60; 
+    auctionState.timeLeft = auctionState.isFinalCall ? 17 : 20; 
     
     timerInterval = setInterval(async () => {
         auctionState.timeLeft--;
@@ -287,6 +289,58 @@ async function broadcastStats() {
         console.error("Stats Error:", err);
     }
 }
+// --- NEXUS DATA SYNC API ---
+const DATA_SYNC_KEY = "NEXUS_SECRET_789"; // Change this to any secret word
+
+app.get('/api/export-results', async (req, res) => {
+    const apiKey = req.headers['x-api-key'];
+
+    // 1. Security Check
+    if (apiKey !== DATA_SYNC_KEY) {
+        return res.status(403).json({ error: "Access Denied: Invalid Sync Key" });
+    }
+
+    try {
+        // 2. Fetch all data
+        const players = await Player.find();
+        const teams = await Team.find();
+
+        // 3. Format data for your other website
+        const formattedData = players.map(p => {
+            let teamName = "Free Agent";
+            let soldPrice = 0;
+
+            if (p.status === 'Sold' && p.soldTo.includes('(')) {
+                const parts = p.soldTo.split('(');
+                teamName = parts[0].trim();
+                soldPrice = parseInt(parts[1].replace(')',''));
+            }
+
+            return {
+                nexus_id: p._id,
+                name: p.name,
+                strength: p.strength,
+                tier: p.cardType,
+                whatsapp: p.phone,
+                image: p.imageUrl,
+                status: p.status,
+                assigned_to: teamName,
+                transfer_fee: soldPrice
+            };
+        });
+
+        // 4. Send the package
+        res.json({
+            tournament_season: "2026-27",
+            total_players: players.length,
+            franchises: teams.map(t => ({ name: t.name, logo: t.logoUrl, remaining_purse: t.budget })),
+            players: formattedData
+        });
+
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
 
 // --- SOCKETS ---
 io.on('connection', async (socket) => {
@@ -475,7 +529,7 @@ socket.on('startAuction', async ({ playerId, baseValue, isHidden }) => {
             activePlayerId: player, 
             currentBid: baseValue, 
             highestBidder: 'No Bids Yet', 
-            timeLeft: 60,
+            timeLeft: 20,
             skippedTeams: [],
             isFinalCall: false,
             finalCallText: "",
@@ -737,7 +791,7 @@ socket.on('hardResetDatabase', async () => {
             activePlayerId: null, 
             currentBid: 0, 
             highestBidder: 'No Bids Yet', 
-            timeLeft: 60,
+            timeLeft: 20,
             skippedTeams: [],
             isFinalCall: false,
             finalCallText: ""
@@ -808,7 +862,7 @@ socket.on('clearOnlyPlayers', async () => {
             activePlayerId: null, 
             currentBid: 0, 
             highestBidder: 'No Bids Yet', 
-            timeLeft: 60,
+            timeLeft: 20,
             skippedTeams: [],
             isFinalCall: false,
             finalCallText: ""
