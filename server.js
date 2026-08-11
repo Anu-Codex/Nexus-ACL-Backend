@@ -660,6 +660,46 @@ socket.on('deductPurse', async ({ teamName, amount }) => {
         socket.emit('errorMsg', "Force deduction failed.");
     }
 });
+    // --- ADMIN FEATURE: DIRECT ASSIGN (NO BUDGET DEDUCTION) ---
+socket.on('adminForceAssign', async ({ playerId, teamName, price }) => {
+    try {
+        const player = await Player.findById(playerId);
+        if (!player) return socket.emit('errorMsg', "Player not found.");
+
+        const soldPrice = Number(price);
+
+        // 1. Update Player (Mark as Sold with the specific value)
+        await Player.findByIdAndUpdate(playerId, {
+            status: 'Sold',
+            soldTo: `${teamName} (${soldPrice}M)`
+        });
+
+        // 2. Save to History for the curved Graph
+        await History.create({ playerName: player.name, price: soldPrice });
+
+        // 3. Trigger the celebratory flashcard & fireworks for everyone
+        io.emit('celebrateSold', {
+            player: player,
+            teamName: teamName,
+            price: soldPrice
+        });
+
+        // 4. Global Refresh (Stats, Tables)
+        const allPlayers = await Player.find();
+        io.emit('updatePlayers', allPlayers);
+        await broadcastStats();
+        
+        io.emit('newMessage', { 
+            sender: "SYSTEM", 
+            role: "admin", 
+            text: `📝 REGISTRATION: ${player.name} assigned to ${teamName} at ${soldPrice}M (Budget preserved).` 
+        });
+
+    } catch (err) {
+        console.error(err);
+        socket.emit('errorMsg', "Assignment failed.");
+    }
+});
     // --- REDUCE SQUAD COUNT (RELEASE PLAYERS) ---
 socket.on('reduceSquadCount', async ({ teamName, count }) => {
     try {
