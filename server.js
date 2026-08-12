@@ -353,7 +353,7 @@ io.on('connection', async (socket) => {
         Team.find(),
         Chat.find().sort({ timestamp: 1 }).limit(50),
         getStatsObject(),
-        History.find().sort({ timestamp: 1 }).limit(30)
+        History.find().sort({ timestamp: 1 }).limit(70)
     ]);
 
     socket.emit('initialData', {
