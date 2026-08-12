@@ -162,34 +162,42 @@ app.get('/fix-budgets', async (req, res) => {
         res.send("✅ All budgets reset to 2000L!");
     } catch (e) { res.status(500).send(e.message); }
 });
-// --- ADD TO AUCTION BACKEND (nexus-acl-backend) server.js ---
+// --- ADD THIS TO THE TOP OF server.js (If not already there) ---
+app.use(express.json()); 
 
+// --- ADD THIS ROUTE ABOVE io.on('connection') ---
 app.post('/api/sync/verify-captain', async (req, res) => {
     try {
         const { email, password, selectedTeam } = req.body;
+        const cleanEmail = email.trim().toLowerCase();
 
-        // 1. Find Captain in Auction DB
-        const user = await mongoose.model('User').findOne({ 
-            email: email.trim().toLowerCase(), 
-            role: 'captain' 
-        });
-
-        if (!user || user.name !== selectedTeam) {
-            return res.status(401).json({ success: false, message: "Captain mismatch in Auction DB" });
+        // 1. Find user (Image 2 confirms role is 'captain')
+        const user = await User.findOne({ email: cleanEmail, role: 'captain' });
+        
+        if (!user) {
+            return res.status(401).json({ success: false, message: "Email not found in Auction DB" });
         }
 
-        // 2. Check Password
-        const isMatch = await bcrypt.compare(password, user.password);
-        if (!isMatch) return res.status(401).json({ success: false, message: "Wrong Password" });
+        // 2. Check Team Match (Image 2 confirms User.name is the Team Name)
+        if (user.name !== selectedTeam) {
+            return res.status(401).json({ success: false, message: "Team mismatch for this account" });
+        }
 
-        // 3. Collect Team Data
-        const team = await mongoose.model('Team').findOne({ name: selectedTeam });
+        // 3. Verify Bcrypt Password
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+            return res.status(401).json({ success: false, message: "Incorrect Password" });
+        }
+
+        // 4. Collect Team Purse and Logo
+        const team = await Team.findOne({ name: selectedTeam });
         
-        // 4. Collect Squad (Find players sold to this team)
-        const squad = await mongoose.model('Player').find({ 
+        // 5. Collect Current Squad (Finding players sold to this team)
+        const squad = await Player.find({ 
             soldTo: { $regex: new RegExp('^' + selectedTeam) } 
         });
 
+        // Send all data back to the Community Backend
         res.json({ 
             success: true, 
             teamName: user.name,
@@ -199,10 +207,10 @@ app.post('/api/sync/verify-captain', async (req, res) => {
         });
 
     } catch (err) {
-        res.status(500).json({ success: false, message: "Auction Server Error" });
+        console.error("Sync Route Error:", err);
+        res.status(500).json({ success: false, message: "Auction Server Internal Error" });
     }
 });
-
 // --- AUCTION LOGIC & TIMER ---
 let auctionState = { 
     activePlayerId: null, 
