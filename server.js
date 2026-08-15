@@ -6,6 +6,8 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const SibApiV3Sdk = require('sib-api-v3-sdk');
 const bcrypt = require('bcryptjs');
+const Groq = require("groq-sdk");
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 const app = express();
 app.use(cors({
@@ -994,13 +996,81 @@ socket.on('disconnect', () => {
     io.emit('ghostWatchCount', focusedCaptains.size);
 });
     // --- PUBLIC RELAY (ZERO MONGODB USAGE) ---
-socket.on('public_msg_send', (data) => {
-    // This event does NOT call Chat.save() or Chat.create()
-    // It is physically impossible to crash the DB with this
-    io.emit('public_msg_receive', {
-        sender: data.sender,
-        text: data.text
-    });
+socket.on('public_msg_send', async (data) => {
+    // 1. Show the user's message in the public chat immediately
+    io.emit('public_msg_receive', data);
+
+    const userText = data.text.trim();
+
+    // 2. Check for Bot Command
+    if (userText.toLowerCase().startsWith('@nexus')) {
+        try {
+            // --- DATA GATHERING (The "Reading" part) ---
+            const [players, teams] = await Promise.all([
+                Player.find(),
+                Team.find()
+            ]);
+
+            const activePlayer = auctionState.activePlayerId ? 
+                `${auctionState.activePlayerId.name} (${auctionState.activePlayerId.cardType}) at ${auctionState.currentBid}M. Highest bidder: ${auctionState.highestBidder}` : 
+                "None (Waiting for nomination)";
+
+            const recentSales = players.filter(p => p.status === 'Sold')
+                .slice(-5).map(p => `${p.name} -> ${p.soldTo}`).join(', ');
+
+            const teamFinancials = teams.map(t => {
+                const count = players.filter(p => p.soldTo.includes(t.name)).length;
+                return `${t.name}: ${t.budget}M remaining (${count}/${t.maxCapacity} slots)`;
+            }).join(' | ');
+
+            // --- SYSTEM PROMPT (The "Personality & Logic") ---
+            const systemContext = `
+                You are Nexus AI, the high-tech automated system for the Champions Auction League. 
+                You have access to the internal database. 
+                
+                LIVE DATABASE SNAPSHOT:
+                - Currently on Block: ${activePlayer}
+                - Franchise Status: ${teamFinancials}
+                - Recent Transfers: ${recentSales || "No sales yet"}
+                - Total Pool: ${players.length} players
+                
+                INSTRUCTIONS:
+                - Answer based ONLY on the snapshot data above.
+                - Be brief, technical, and professional. 
+                - Use a "System Notification" tone. 
+                - Use football and tech emojis.
+            `;
+
+            // --- CALL GROQ ---
+            const completion = await groq.chat.completions.create({
+                messages: [
+                    { role: "system", content: systemContext },
+                    { role: "user", content: userText.replace('@nexus', '') }
+                ],
+                model: "llama3-8b-8192", // Fast and smart
+                temperature: 0.5,
+                max_tokens: 150
+            });
+
+            const botResponse = completion.choices[0].message.content;
+
+            // --- BROADCAST BOT REPLY ---
+            io.emit('public_msg_receive', {
+                sender: "NEXUS AI",
+                role: "bot",
+                text: botResponse
+            });
+
+        } catch (err) {
+            console.error("Groq AI Error:", err);
+            // Fallback if API fails
+            io.emit('public_msg_receive', {
+                sender: "NEXUS AI",
+                role: "bot",
+                text: "⚠️ [SYSTEM ERROR]: Connection to AI Core lost. Recalibrating..."
+            });
+        }
+    }
 });
     // --- PUBLIC REACTION RELAY (ZERO DB PRESSURE) ---
 socket.on('public_reaction_send', (emoji) => {
