@@ -998,47 +998,53 @@ socket.on('disconnect', () => {
     io.emit('ghostWatchCount', focusedCaptains.size);
 });
 
-// --- 2. THE BOT LOGIC (Inside io.on('connection')) ---
+// --- UPDATED GEMINI LOGIC WITH AUTO-FALLBACK ---
 socket.on('public_msg_send', async (data) => {
-    io.emit('public_msg_receive', data); // Show user message immediately
+    io.emit('public_msg_receive', data);
     const userText = data.text.trim();
 
     if (userText.toLowerCase().startsWith('@nexus')) {
         try {
-            // A. Gather Data
             const [players, teams] = await Promise.all([Player.find(), Team.find()]);
             const activePlayer = auctionState.activePlayerId ? 
                 `${auctionState.activePlayerId.name} at ${auctionState.currentBid}M` : "None";
-            
             const teamStats = teams.map(t => `${t.name}: ${t.budget}M (${players.filter(p => p.soldTo.includes(t.name)).length}/${t.maxCapacity})`).join(' | ');
 
-            const prompt = `System: You are Nexus AI for an auction. Data: ${activePlayer}. Teams: ${teamStats}. User asks: ${userText}. Reply very briefly (1 sentence) with emojis.`;
+            const prompt = `System: Auction Bot. Data: ${activePlayer}. Teams: ${teamStats}. User: ${userText}. Reply in 1 short sentence with emojis.`;
 
-            // B. CALL GEMINI WITH SAFETY CATCH
-            // We use 'gemini-1.5-flash' which is the current stable standard
-            const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+            // Function to try calling Gemini with different model IDs
+            const getAIResponse = async () => {
+                const modelsToTry = ["gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-1.0-pro"];
+                
+                for (let modelName of modelsToTry) {
+                    try {
+                        console.log(`🤖 Attempting AI call with: ${modelName}`);
+                        const model = genAI.getGenerativeModel({ model: modelName });
+                        const result = await model.generateContent(prompt);
+                        return result.response.text();
+                    } catch (err) {
+                        console.error(`❌ ${modelName} failed:`, err.message);
+                        // If it's a 404, the loop continues to the next model
+                        continue;
+                    }
+                }
+                return null;
+            };
 
-            const result = await model.generateContent(prompt).catch(err => {
-                // This catch blocks the 404 error from killing your server!
-                console.error("Gemini API Error caught safely:", err.message);
-                return null; 
-            });
+            const botText = await getAIResponse();
 
-            // C. BROADCAST RESPONSE (Or Error Message)
-            if (!result) {
-                return io.emit('public_msg_receive', {
+            if (botText) {
+                io.emit('public_msg_receive', { sender: "NEXUS AI", role: "bot", text: botText });
+            } else {
+                io.emit('public_msg_receive', {
                     sender: "NEXUS AI",
                     role: "bot",
-                    text: "📡 [CORE BUSY]: AI is recalibrating. Bidding system is still 100% active! ⚽"
+                    text: "📡 [CORE OFFLINE]: All AI models are currently unavailable. Bidding is still active! ⚽"
                 });
             }
 
-            const botText = result.response.text();
-            io.emit('public_msg_receive', { sender: "NEXUS AI", role: "bot", text: botText });
-
         } catch (err) {
             console.error("Critical Bot Logic Error:", err);
-            // Even if the logic fails, server stays up
         }
     }
 });
