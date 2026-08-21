@@ -10,6 +10,9 @@ const Groq = require("groq-sdk");
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+// --- UPDATED GEMINI LOGIC WITH AUTO-FALLBACK ---
+const { Mistral } = require('@mistralai/mistralai');
+const mistral = new Mistral({ apiKey: process.env.MISTRAL_API_KEY });
 
 const app = express();
 app.use(cors({
@@ -998,53 +1001,63 @@ socket.on('disconnect', () => {
     io.emit('ghostWatchCount', focusedCaptains.size);
 });
 
-// --- UPDATED GEMINI LOGIC WITH AUTO-FALLBACK ---
+
+
 socket.on('public_msg_send', async (data) => {
     io.emit('public_msg_receive', data);
-    const userText = data.text.trim();
+    const userText = data.text.toLowerCase().trim();
 
-    if (userText.toLowerCase().startsWith('@nexus')) {
+    if (userText.startsWith('@nexus')) {
         try {
+            // 1. GATHER LIVE DATA
             const [players, teams] = await Promise.all([Player.find(), Team.find()]);
-            const activePlayer = auctionState.activePlayerId ? 
-                `${auctionState.activePlayerId.name} at ${auctionState.currentBid}M` : "None";
-            const teamStats = teams.map(t => `${t.name}: ${t.budget}M (${players.filter(p => p.soldTo.includes(t.name)).length}/${t.maxCapacity})`).join(' | ');
+            const query = userText.replace('@nexus', '').trim();
 
-            const prompt = `System: Auction Bot. Data: ${activePlayer}. Teams: ${teamStats}. User: ${userText}. Reply in 1 short sentence with emojis.`;
+            // 2. ENGINE A: HARD-CODED LOGIC (Instant, 0% Failure Rate)
+            let response = "";
 
-            // Function to try calling Gemini with different model IDs
-            const getAIResponse = async () => {
-                const modelsToTry = ["gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-1.0-pro"];
-                
-                for (let modelName of modelsToTry) {
-                    try {
-                        console.log(`🤖 Attempting AI call with: ${modelName}`);
-                        const model = genAI.getGenerativeModel({ model: modelName });
-                        const result = await model.generateContent(prompt);
-                        return result.response.text();
-                    } catch (err) {
-                        console.error(`❌ ${modelName} failed:`, err.message);
-                        // If it's a 404, the loop continues to the next model
-                        continue;
-                    }
+            if (query.includes('richest') || query.includes('money')) {
+                const richest = [...teams].sort((a,b) => b.budget - a.budget)[0];
+                response = `💰 FINANCIAL LEADER: ${richest.name} has the most money (${richest.budget}M).`;
+            } 
+            else if (query.includes('player') || query.includes('block')) {
+                response = auctionState.activePlayerId ? 
+                    `👤 ON BLOCK: ${auctionState.activePlayerId.name} (${auctionState.activePlayerId.cardType}). Current bid: ${auctionState.currentBid}M by ${auctionState.highestBidder}.` :
+                    "🏟️ STATUS: The auction block is currently empty.";
+            }
+            else if (query.includes('squad') || query.includes('slots')) {
+                const teamName = query.split(' ').pop(); // Try to get team name from end
+                const team = teams.find(t => t.name.toLowerCase().includes(teamName));
+                if (team) {
+                    const count = players.filter(p => p.soldTo.includes(team.name)).length;
+                    response = `📊 SQUAD CHECK: ${team.name} has signed ${count}/${team.maxCapacity} players.`;
+                } else {
+                    response = "📊 SQUAD STATS: Check the 'Franchise Squad Monitor' below for all team counts.";
                 }
-                return null;
-            };
-
-            const botText = await getAIResponse();
-
-            if (botText) {
-                io.emit('public_msg_receive', { sender: "NEXUS AI", role: "bot", text: botText });
-            } else {
-                io.emit('public_msg_receive', {
-                    sender: "NEXUS AI",
-                    role: "bot",
-                    text: "📡 [CORE OFFLINE]: All AI models are currently unavailable. Bidding is still active! ⚽"
-                });
             }
 
+            // 3. ENGINE B: MISTRAL AI (For "Chatty" or Complex Questions)
+            if (!response) {
+                const teamStats = teams.map(t => `${t.name}:${t.budget}M`).join(', ');
+                const systemPrompt = `You are Nexus AI. Live Stats: ${teamStats}. Be very brief (10 words). Use 1 emoji.`;
+
+                const chatResponse = await mistral.chat.complete({
+                    model: 'open-mistral-7b', // This model is very stable and free
+                    messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: query }],
+                }).catch(() => null);
+
+                response = chatResponse ? chatResponse.choices[0].message.content : "📡 Signal interference. Bidding is still 100% active!";
+            }
+
+            // 4. FINAL BROADCAST
+            io.emit('public_msg_receive', {
+                sender: "NEXUS AI",
+                role: "bot",
+                text: response
+            });
+
         } catch (err) {
-            console.error("Critical Bot Logic Error:", err);
+            console.error("Bot Logic Error:", err);
         }
     }
 });
