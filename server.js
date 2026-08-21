@@ -10,10 +10,9 @@ const Groq = require("groq-sdk");
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-// --- UPDATED GEMINI LOGIC WITH AUTO-FALLBACK ---
-const { Mistral } = require('@mistralai/mistralai');
-const mistral = new Mistral({ apiKey: process.env.MISTRAL_API_KEY });
-
+// Use MistralClient (the stable constructor for v0.5.0)
+const MistralClient = require('@mistralai/mistralai').default; 
+const mistral = new MistralClient(process.env.MISTRAL_API_KEY);
 const app = express();
 app.use(cors({
     origin: ["https://pes-park-official.vercel.app", "http://localhost:3000"], // Your Community site URL
@@ -1038,15 +1037,19 @@ socket.on('public_msg_send', async (data) => {
 
             // 3. ENGINE B: MISTRAL AI (For "Chatty" or Complex Questions)
             if (!response) {
-                const teamStats = teams.map(t => `${t.name}:${t.budget}M`).join(', ');
+                const teamStats = teams.map(t => `${t.name}: ${t.budget}M`).join(', ');
                 const systemPrompt = `You are Nexus AI. Live Stats: ${teamStats}. Be very brief (10 words). Use 1 emoji.`;
 
-                const chatResponse = await mistral.chat.complete({
-                    model: 'open-mistral-7b', // This model is very stable and free
+                // Use mistral.chat instead of mistral.chat.complete
+                const chatResponse = await mistral.chat({
+                    model: 'open-mistral-7b',
                     messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: query }],
-                }).catch(() => null);
+                }).catch((err) => {
+                    console.error("Mistral API Error:", err.message);
+                    return null;
+                });
 
-                response = chatResponse ? chatResponse.choices[0].message.content : "📡 Signal interference. Bidding is still 100% active!";
+                response = chatResponse ? chatResponse.choices[0].message.content : "📡 AI Core busy. Bidding system is active!";
             }
 
             // 4. FINAL BROADCAST
