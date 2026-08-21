@@ -8,6 +8,11 @@ const SibApiV3Sdk = require('sib-api-v3-sdk');
 const bcrypt = require('bcryptjs');
 const Groq = require("groq-sdk");
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const { GoogleGenerativeAI } = require("@google/generative-ai");
+
+// Initialize Gemini with your API Key
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const aiModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
 const app = express();
 app.use(cors({
@@ -997,77 +1002,64 @@ socket.on('disconnect', () => {
 });
     // --- PUBLIC RELAY (ZERO MONGODB USAGE) ---
 socket.on('public_msg_send', async (data) => {
-    // 1. Show the user's message in the public chat immediately
+    // 1. Show the user message to everyone
     io.emit('public_msg_receive', data);
 
     const userText = data.text.trim();
 
-    // 2. Check for Bot Command
     if (userText.toLowerCase().startsWith('@nexus')) {
         try {
-            // --- DATA GATHERING (The "Reading" part) ---
+            // --- LIVE DATA GATHERING ---
             const [players, teams] = await Promise.all([
                 Player.find(),
                 Team.find()
             ]);
 
             const activePlayer = auctionState.activePlayerId ? 
-                `${auctionState.activePlayerId.name} (${auctionState.activePlayerId.cardType}) at ${auctionState.currentBid}M. Highest bidder: ${auctionState.highestBidder}` : 
-                "None (Waiting for nomination)";
+                `${auctionState.activePlayerId.name} (${auctionState.activePlayerId.cardType}) at ${auctionState.currentBid}M. High Bidder: ${auctionState.highestBidder}` : 
+                "No player currently on the block.";
 
-            const recentSales = players.filter(p => p.status === 'Sold')
-                .slice(-5).map(p => `${p.name} -> ${p.soldTo}`).join(', ');
-
-            const teamFinancials = teams.map(t => {
+            const teamStats = teams.map(t => {
                 const count = players.filter(p => p.soldTo.includes(t.name)).length;
-                return `${t.name}: ${t.budget}M remaining (${count}/${t.maxCapacity} slots)`;
+                return `${t.name}: ${t.budget}M (${count}/${t.maxCapacity} slots)`;
             }).join(' | ');
 
-            // --- SYSTEM PROMPT (The "Personality & Logic") ---
-            const systemContext = `
-                You are Nexus AI, the high-tech automated system for the Champions Auction League. 
-                You have access to the internal database. 
+            // --- CONTEXT INJECTION (The "Reading" Part) ---
+            const prompt = `
+                You are NEXUS AI, the futuristic digital assistant for the Champions Auction League.
+                LIVE DATA:
+                - Currently Bidding: ${activePlayer}
+                - Team Purses/Slots: ${teamStats}
+                - System: Season 2026-27. Tiers: BIG TIME, EPIC, SHOWTIME, HIGHLIGHT.
                 
-                LIVE DATABASE SNAPSHOT:
-                - Currently on Block: ${activePlayer}
-                - Franchise Status: ${teamFinancials}
-                - Recent Transfers: ${recentSales || "No sales yet"}
-                - Total Pool: ${players.length} players
+                USER QUESTION: "${userText.replace('@nexus', '')}"
                 
-                INSTRUCTIONS:
-                - Answer based ONLY on the snapshot data above.
-                - Be brief, technical, and professional. 
-                - Use a "System Notification" tone. 
-                - Use football and tech emojis.
+                RULES:
+                1. Answer based ONLY on the live data provided above.
+                2. Be extremely brief (max 2 sentences).
+                3. Use a technical, "AI Overlord" personality.
+                4. Use 1 or 2 emojis (⚡, 🤖, ⚽).
             `;
 
-            // --- CALL GROQ ---
-            const completion = await groq.chat.completions.create({
-                messages: [
-                    { role: "system", content: systemContext },
-                    { role: "user", content: userText.replace('@nexus', '') }
-                ],
-                model: "gpt-oss-120b", // Fast and smart
-                temperature: 0.5,
-                max_tokens: 150
-            });
+            // --- GENERATE RESPONSE ---
+            const result = await aiModel.generateContent(prompt);
+            const response = await result.response;
+            const botText = response.text();
 
-            const botResponse = completion.choices[0].message.content;
-
-            // --- BROADCAST BOT REPLY ---
+            // --- BROADCAST ---
             io.emit('public_msg_receive', {
                 sender: "NEXUS AI",
                 role: "bot",
-                text: botResponse
+                text: botText
             });
 
         } catch (err) {
-            console.error("Groq AI Error:", err);
-            // Fallback if API fails
+            console.error("Gemini Error:", err);
+            // Non-crashing error message
             io.emit('public_msg_receive', {
                 sender: "NEXUS AI",
                 role: "bot",
-                text: "⚠️ [SYSTEM ERROR]: Connection to AI Core lost. Recalibrating..."
+                text: "📡 [SIGNAL LOST]: AI Core is currently recalibrating. Try again shortly."
             });
         }
     }
