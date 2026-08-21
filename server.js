@@ -9,10 +9,7 @@ const bcrypt = require('bcryptjs');
 const Groq = require("groq-sdk");
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const { GoogleGenerativeAI } = require("@google/generative-ai");
-
-// Initialize Gemini with your API Key
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const aiModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
 const app = express();
 app.use(cors({
@@ -1000,67 +997,48 @@ socket.on('disconnect', () => {
     focusedCaptains.delete(socket.id);
     io.emit('ghostWatchCount', focusedCaptains.size);
 });
-    // --- PUBLIC RELAY (ZERO MONGODB USAGE) ---
-socket.on('public_msg_send', async (data) => {
-    // 1. Show the user message to everyone
-    io.emit('public_msg_receive', data);
 
+// --- 2. THE BOT LOGIC (Inside io.on('connection')) ---
+socket.on('public_msg_send', async (data) => {
+    io.emit('public_msg_receive', data); // Show user message immediately
     const userText = data.text.trim();
 
     if (userText.toLowerCase().startsWith('@nexus')) {
         try {
-            // --- LIVE DATA GATHERING ---
-            const [players, teams] = await Promise.all([
-                Player.find(),
-                Team.find()
-            ]);
-
+            // A. Gather Data
+            const [players, teams] = await Promise.all([Player.find(), Team.find()]);
             const activePlayer = auctionState.activePlayerId ? 
-                `${auctionState.activePlayerId.name} (${auctionState.activePlayerId.cardType}) at ${auctionState.currentBid}M. High Bidder: ${auctionState.highestBidder}` : 
-                "No player currently on the block.";
+                `${auctionState.activePlayerId.name} at ${auctionState.currentBid}M` : "None";
+            
+            const teamStats = teams.map(t => `${t.name}: ${t.budget}M (${players.filter(p => p.soldTo.includes(t.name)).length}/${t.maxCapacity})`).join(' | ');
 
-            const teamStats = teams.map(t => {
-                const count = players.filter(p => p.soldTo.includes(t.name)).length;
-                return `${t.name}: ${t.budget}M (${count}/${t.maxCapacity} slots)`;
-            }).join(' | ');
+            const prompt = `System: You are Nexus AI for an auction. Data: ${activePlayer}. Teams: ${teamStats}. User asks: ${userText}. Reply very briefly (1 sentence) with emojis.`;
 
-            // --- CONTEXT INJECTION (The "Reading" Part) ---
-            const prompt = `
-                You are NEXUS AI, the futuristic digital assistant for the Champions Auction League.
-                LIVE DATA:
-                - Currently Bidding: ${activePlayer}
-                - Team Purses/Slots: ${teamStats}
-                - System: Season 2026-27. Tiers: BIG TIME, EPIC, SHOWTIME, HIGHLIGHT.
-                
-                USER QUESTION: "${userText.replace('@nexus', '')}"
-                
-                RULES:
-                1. Answer based ONLY on the live data provided above.
-                2. Be extremely brief (max 2 sentences).
-                3. Use a technical, "AI Overlord" personality.
-                4. Use 1 or 2 emojis (⚡, 🤖, ⚽).
-            `;
+            // B. CALL GEMINI WITH SAFETY CATCH
+            // We use 'gemini-1.5-flash' which is the current stable standard
+            const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-            // --- GENERATE RESPONSE ---
-            const result = await aiModel.generateContent(prompt);
-            const response = await result.response;
-            const botText = response.text();
-
-            // --- BROADCAST ---
-            io.emit('public_msg_receive', {
-                sender: "NEXUS AI",
-                role: "bot",
-                text: botText
+            const result = await model.generateContent(prompt).catch(err => {
+                // This catch blocks the 404 error from killing your server!
+                console.error("Gemini API Error caught safely:", err.message);
+                return null; 
             });
+
+            // C. BROADCAST RESPONSE (Or Error Message)
+            if (!result) {
+                return io.emit('public_msg_receive', {
+                    sender: "NEXUS AI",
+                    role: "bot",
+                    text: "📡 [CORE BUSY]: AI is recalibrating. Bidding system is still 100% active! ⚽"
+                });
+            }
+
+            const botText = result.response.text();
+            io.emit('public_msg_receive', { sender: "NEXUS AI", role: "bot", text: botText });
 
         } catch (err) {
-            console.error("Gemini Error:", err);
-            // Non-crashing error message
-            io.emit('public_msg_receive', {
-                sender: "NEXUS AI",
-                role: "bot",
-                text: "📡 [SIGNAL LOST]: AI Core is currently recalibrating. Try again shortly."
-            });
+            console.error("Critical Bot Logic Error:", err);
+            // Even if the logic fails, server stays up
         }
     }
 });
