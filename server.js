@@ -1047,7 +1047,7 @@ socket.on('public_msg_send', async (data) => {
                     { role: "system", content: systemContext },
                     { role: "user", content: userText.replace('@nexus', '') }
                 ],
-                model: "gemma2-9b-it", // Fast and smart
+                model: "gpt-oss-120b", // Fast and smart
                 temperature: 0.5,
                 max_tokens: 150
             });
