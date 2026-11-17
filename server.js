@@ -45,6 +45,7 @@ const playerSchema = new mongoose.Schema({
     name: String, strength: Number, cardType: String, baseValue: Number,
     phone: Number,
     imageUrl: String,
+    archived: { type: Boolean, default: false },
     status: { type: String, default: 'Available' }, soldTo: { type: String, default: '-' }
 });
 
@@ -301,7 +302,7 @@ async function autoSellPlayer() {
     }
 }
 async function getStatsObject() {
-    const players = await Player.find();
+    const players = await Player.find({ archived: { $ne: true } });
     const countTier = (tierName) => players.filter(p => 
         p.cardType && p.cardType.toLowerCase() === tierName.toLowerCase()
     ).length;
@@ -320,7 +321,7 @@ async function getStatsObject() {
 }
 async function broadcastStats() {
     try {
-        const players = await Player.find();
+        const players = await Player.find({ archived: { $ne: true } });
         
         // Helper to count tiers regardless of CAPS/lowercase
         const countTier = (tierName) => players.filter(p => 
@@ -358,7 +359,7 @@ app.get('/api/export-results', async (req, res) => {
 
     try {
         // 2. Fetch all data
-        const players = await Player.find();
+        const players = await Player.find({ archived: { $ne: true } });
         const teams = await Team.find();
 
         // 3. Format data for your other website
@@ -403,7 +404,7 @@ io.on('connection', async (socket) => {
     
     // All stats and initial data fetching goes here
     const [players, teams, chats, stats, history] = await Promise.all([
-        Player.find(),
+        Player.find({ archived: { $ne: true } }),
         Team.find(),
         Chat.find().sort({ timestamp: 1 }).limit(50),
         getStatsObject(),
@@ -572,7 +573,7 @@ socket.on('createNewTeam', async ({ name, budget }) => {
             });
             await newPlayer.save();
             await broadcastStats();
-            io.emit('updatePlayers', await Player.find()); 
+            io.emit('updatePlayers', await Player.find({ archived: { $ne: true } })); 
         } catch (err) { console.error(err); }
     });
 
@@ -592,7 +593,7 @@ socket.on('startAuction', async ({ playerId, baseValue, isHidden }) => {
             isHidden: isHidden || false // Now it knows what isHidden is!
         };
         // Broadcast the status reset to the list
-        io.emit('updatePlayers', await Player.find());
+        io.emit('updatePlayers', await Player.find({ archived: { $ne: true } }));
         io.emit('updateAuction', auctionState);
         
         // Optional: Notify the chat
@@ -639,7 +640,7 @@ socket.on('startAuction', async ({ playerId, baseValue, isHidden }) => {
     }
 
     const team = await Team.findOne({ name: teamName });
-    const playerCount = await Player.countDocuments({ soldTo: new RegExp('^' + teamName) });
+    const playerCount = await Player.countDocuments({ soldTo: new RegExp('^' + teamName), archived: { $ne: true } });
 
     if (playerCount >= team.maxCapacity) {
         return socket.emit('errorMsg', `🚫 SQUAD FULL! Limit is ${team.maxCapacity}.`);
@@ -739,7 +740,7 @@ socket.on('adminForceAssign', async ({ playerId, teamName, price }) => {
         });
 
         // 4. Global Refresh (Stats, Tables)
-        const allPlayers = await Player.find();
+        const allPlayers = await Player.find({ archived: { $ne: true } });
         io.emit('updatePlayers', allPlayers);
         await broadcastStats();
         
@@ -865,7 +866,7 @@ socket.on('deleteTeam', async (id) => {
     socket.on('deletePlayer', async (playerId) => {
         await Player.findByIdAndDelete(playerId);
         await broadcastStats();
-        io.emit('updatePlayers', await Player.find()); 
+        io.emit('updatePlayers', await Player.find({ archived: { $ne: true } })); 
     });
     // --- MEGA RESET (ADMIN ONLY) ---
 socket.on('hardResetDatabase', async () => {
@@ -934,8 +935,8 @@ socket.on('markUnsold', async () => {
             finalCallText: ""
         };
 
-        // 4. Broadcast updates
-        io.emit('updatePlayers', await Player.find());
+        // 4. Broadcast updatesPlayer.find({ archived: { $ne: true } })Player.find());
+        io.emit('updatePlayers', await Player.find({ archived: { $ne: true } }));
         io.emit('updateAuction', auctionState);
         await broadcastStats();
         io.emit('newMessage', { 
@@ -1127,7 +1128,7 @@ socket.on('updatePlayerImage', async ({ playerId, imageUrl }) => {
         await Player.findByIdAndUpdate(playerId, { imageUrl: imageUrl });
         
         // Refresh the list for everyone
-        const updatedPlayers = await Player.find();
+        const updatedPlayers = await Player.find({ archived: { $ne: true } });
         io.emit('updatePlayers', updatedPlayers);
         
         // If this player is currently live, update the auction screen too
@@ -1142,6 +1143,38 @@ socket.on('updatePlayerImage', async ({ playerId, imageUrl }) => {
         socket.emit('errorMsg', "Failed to update image");
     }
 });
+    socket.on('archiveRosterForNewAuction', async () => {
+    try {
+        await Player.updateMany({ archived: { $ne: true } }, { $set: { archived: true } });
+
+        clearInterval(timerInterval);
+        auctionState = { activePlayerId: null, currentBid: 0, highestBidder: 'No Bids Yet', timeLeft: 20, skippedTeams: [], isFinalCall: false, finalCallText: "", isHidden: false };
+
+        clearInterval(slideshowInterval);
+        slideshowState = { active: false, currentIndex: 0, players: [] };
+
+        io.emit('updatePlayers', []);
+        io.emit('updateAuction', auctionState);
+        io.emit('updateSlideshow', slideshowState);
+        await broadcastStats();
+        io.emit('newMessage', { sender: "SYSTEM", role: "admin", text: "📦 Previous roster archived safely. Ready for new auction!" });
+    } catch (err) {
+        console.error("Archive Error:", err);
+        socket.emit('errorMsg', "Failed to archive roster.");
+    }
+});
+
+socket.on('restoreArchivedRoster', async () => {
+    try {
+        await Player.updateMany({ archived: true }, { $set: { archived: false } });
+        io.emit('updatePlayers', await Player.find({ archived: { $ne: true } }));
+        await broadcastStats();
+        io.emit('newMessage', { sender: "SYSTEM", role: "admin", text: "♻️ Archived players restored to live roster." });
+    } catch (err) {
+        console.error("Restore Error:", err);
+        socket.emit('errorMsg', "Failed to restore archive.");
+    }
+});0
 });
 
 server.listen(process.env.PORT || 3000, () => console.log("Server Running"));
