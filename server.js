@@ -761,7 +761,7 @@ socket.on('reduceSquadCount', async ({ teamName, count }) => {
         // 1. Find the players sold to this team (limit by the number typed)
         // We sort by _id descending to remove the most recently bought players first
         const playersToRelease = await Player.find({ 
-            soldTo: { $regex: new RegExp('^' + teamName) } 
+            soldTo: { $regex: new RegExp('^' + teamName) }, archived: { $ne: true } 
         }).sort({ _id: -1 }).limit(Number(count));
 
         if (playersToRelease.length === 0) {
@@ -1073,7 +1073,7 @@ socket.on('public_reaction_send', (emoji) => {
     // --- SLIDESHOW LOGIC ---
     socket.on('toggleSlideshow', async (shouldStart) => {
         if (shouldStart) {
-            const unsoldPlayers = await Player.find({ status: 'Unsold' });
+            const unsoldPlayers = await Player.find({ status: 'Unsold', archived: { $ne: true } });
             if (unsoldPlayers.length === 0) return socket.emit('errorMsg', "No unsold players to show!");
             
             slideshowState = { active: true, currentIndex: 0, players: unsoldPlayers };
