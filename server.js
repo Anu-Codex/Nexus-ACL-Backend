@@ -1103,7 +1103,7 @@ socket.on('sendReaction', (emoji) => {
         await broadcastStats();
         
         // Refresh the list for everyone
-        const allPlayers = await Player.find();
+        const allPlayers = await Player.find({ archived: { $ne: true } });
         io.emit('updatePlayers', allPlayers);
         
         // Send success message back to the admin who uploaded
