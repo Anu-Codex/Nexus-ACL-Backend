@@ -201,8 +201,9 @@ app.post('/api/sync/verify-captain', async (req, res) => {
         
         // 5. Collect Current Squad (Finding players sold to this team)
         const squad = await Player.find({ 
-            soldTo: { $regex: new RegExp('^' + selectedTeam) } 
-        });
+    soldTo: { $regex: new RegExp('^' + selectedTeam) },
+    archived: { $ne: true }
+});
 
         // Send all data back to the Community Backend
         res.json({ 
@@ -252,20 +253,40 @@ function getFinalCallText(seconds) {
     return "SOLD!";
 }
 
+let isProcessingSale = false;
+
 function startTimer() {
     clearInterval(timerInterval);
-    // If it's a final call, we start from 30, otherwise standard 60 (or 120 as you mentioned)
-    auctionState.timeLeft = auctionState.isFinalCall ? 17 : 20; 
-    
+    auctionState.timeLeft = auctionState.isFinalCall ? 17 : 20;
+
     timerInterval = setInterval(async () => {
+        if (isProcessingSale || !auctionState.activePlayerId) {
+            clearInterval(timerInterval);
+            return;
+        }
+
         auctionState.timeLeft--;
-        
+
         if (auctionState.isFinalCall) {
             auctionState.finalCallText = getFinalCallText(auctionState.timeLeft);
         }
+
         if (auctionState.timeLeft <= 0) {
             clearInterval(timerInterval);
-            await autoSellPlayer();
+            auctionState.timeLeft = 0;
+
+            if (auctionState.highestBidder && auctionState.highestBidder !== 'No Bids Yet') {
+                console.log(`⏰ Timer ended -> Auto-selling ${auctionState.activePlayerId.name} to ${auctionState.highestBidder}`);
+                await autoSellPlayer();
+            } else {
+                // Emit 0s so UI doesn't look stuck at 1S when there were no bids
+                io.emit('updateAuction', auctionState);
+                io.emit('newMessage', {
+                    sender: "SYSTEM",
+                    role: "admin",
+                    text: `⏰ Time's up for ${auctionState.activePlayerId.name} with no bids. Admin can Mark Unsold or Cancel.`
+                });
+            }
         } else {
             io.emit('updateAuction', auctionState);
         }
@@ -273,8 +294,16 @@ function startTimer() {
 }
 
 async function autoSellPlayer() {
-    if (auctionState.activePlayerId && auctionState.highestBidder !== 'No Bids Yet') {
-        const price = auctionState.currentBid;
+    if (isProcessingSale) return;
+    if (!auctionState.activePlayerId || !auctionState.highestBidder || auctionState.highestBidder === 'No Bids Yet') {
+        return;
+    }
+
+    isProcessingSale = true;
+    clearInterval(timerInterval);
+
+    try {
+        const price = Number(auctionState.currentBid);
         const teamName = auctionState.highestBidder;
         const player = auctionState.activePlayerId;
 
@@ -284,21 +313,35 @@ async function autoSellPlayer() {
         });
         await Team.findOneAndUpdate({ name: teamName }, { $inc: { budget: -price } });
         await History.create({ playerName: player.name, price: price });
-        
-        // --- NEW BROADCAST EVENT ---
+
+        // Reset full auctionState cleanly BEFORE broadcasting
+        auctionState = {
+            activePlayerId: null,
+            currentBid: 0,
+            highestBidder: 'No Bids Yet',
+            timeLeft: 0,
+            skippedTeams: [],
+            isFinalCall: false,
+            finalCallText: "",
+            isHidden: false
+        };
+
         io.emit('celebrateSold', {
             player: player,
             teamName: teamName,
             price: price
         });
 
-        auctionState = { activePlayerId: null, currentBid: 0, highestBidder: 'No Bids Yet', timeLeft: 0 };
-        
-        io.emit('updatePlayers', await Player.find());
-        io.emit('updateTeams', await Team.find());
         io.emit('updateAuction', auctionState);
+        io.emit('updatePlayers', await Player.find({ archived: { $ne: true } }));
+        io.emit('updateTeams', await Team.find());
         await broadcastStats();
         io.emit('newMessage', { sender: "SYSTEM", role: "admin", text: `🔴 SOLD! ${teamName} bought ${player.name} for ${price}M.` });
+    } catch (err) {
+        console.error("❌ autoSellPlayer Error:", err);
+        io.emit('errorMsg', "Auto-sell failed: " + err.message);
+    } finally {
+        isProcessingSale = false;
     }
 }
 async function getStatsObject() {
@@ -629,12 +672,14 @@ socket.on('startAuction', async ({ playerId, baseValue, isHidden }) => {
 });
 
     socket.on('placeBid', async ({ teamName, increment }) => {
-    // 1. Check if they already skipped
+    if (!auctionState.activePlayerId || isProcessingSale || auctionState.timeLeft <= 0) {
+        return socket.emit('errorMsg', "Round has already ended!");
+    }
+
     if (auctionState.skippedTeams.includes(teamName)) {
         return socket.emit('errorMsg', "You skipped this round!");
     }
 
-    // 2. Check if they are already the highest bidder
     if (auctionState.highestBidder === teamName) {
         return socket.emit('errorMsg', "You are already the highest bidder!");
     }
@@ -642,22 +687,24 @@ socket.on('startAuction', async ({ playerId, baseValue, isHidden }) => {
     const team = await Team.findOne({ name: teamName });
     const playerCount = await Player.countDocuments({ soldTo: new RegExp('^' + teamName), archived: { $ne: true } });
 
+    // Re-check after DB awaits in case timer ended while querying
+    if (!auctionState.activePlayerId || isProcessingSale || auctionState.timeLeft <= 0) {
+        return socket.emit('errorMsg', "Round just ended!");
+    }
+
     if (playerCount >= team.maxCapacity) {
         return socket.emit('errorMsg', `🚫 SQUAD FULL! Limit is ${team.maxCapacity}.`);
     }
+
     const newBid = auctionState.currentBid + increment;
 
     if (team && team.budget >= newBid) {
         auctionState.currentBid = newBid;
         auctionState.highestBidder = teamName;
-
-        // --- NEW CODE ADDED HERE ---
-        // If someone bids, we cancel the Final Call and return to normal timer
         auctionState.isFinalCall = false;
         auctionState.finalCallText = "";
-        // ---------------------------
 
-        startTimer(); // This will now reset to 60s because isFinalCall is false
+        startTimer();
         io.emit('updateAuction', auctionState);
     }
 });
@@ -777,7 +824,7 @@ socket.on('reduceSquadCount', async ({ teamName, count }) => {
         }
 
         // 3. Sync everything
-        io.emit('updatePlayers', await Player.find());
+        io.emit('updatePlayers', await Player.find({ archived: { $ne: true } }));
         io.emit('updateTeams', await Team.find());
         await broadcastStats(); 
         
@@ -1010,7 +1057,7 @@ socket.on('public_msg_send', async (data) => {
     if (userText.startsWith('@nexus')) {
         try {
             // 1. GATHER LIVE DATA
-            const [players, teams] = await Promise.all([Player.find(), Team.find()]);
+            const [players, teams] = await Promise.all([Player.find({ archived: { $ne: true } }), Team.find()]);
             const query = userText.replace('@nexus', '').trim();
 
             // 2. ENGINE A: HARD-CODED LOGIC (Instant, 0% Failure Rate)
@@ -1174,7 +1221,7 @@ socket.on('restoreArchivedRoster', async () => {
         console.error("Restore Error:", err);
         socket.emit('errorMsg', "Failed to restore archive.");
     }
-});0
+});
 });
 
 server.listen(process.env.PORT || 3000, () => console.log("Server Running"));
