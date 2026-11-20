@@ -279,13 +279,42 @@ function startTimer() {
                 console.log(`⏰ Timer ended -> Auto-selling ${auctionState.activePlayerId.name} to ${auctionState.highestBidder}`);
                 await autoSellPlayer();
             } else {
-                // Emit 0s so UI doesn't look stuck at 1S when there were no bids
-                io.emit('updateAuction', auctionState);
-                io.emit('newMessage', {
-                    sender: "SYSTEM",
-                    role: "admin",
-                    text: `⏰ Time's up for ${auctionState.activePlayerId.name} with no bids. Admin can Mark Unsold or Cancel.`
-                });
+                // Auto-mark Unsold when timer hits 0 with no bids
+                if (isProcessingSale || !auctionState.activePlayerId) return;
+                isProcessingSale = true;
+
+                try {
+                    const player = auctionState.activePlayerId;
+
+                    await Player.findByIdAndUpdate(player._id, {
+                        status: 'Unsold',
+                        soldTo: 'UNSOLD'
+                    });
+
+                    auctionState = {
+                        activePlayerId: null,
+                        currentBid: 0,
+                        highestBidder: 'No Bids Yet',
+                        timeLeft: 0,
+                        skippedTeams: [],
+                        isFinalCall: false,
+                        finalCallText: "",
+                        isHidden: false
+                    };
+
+                    io.emit('updateAuction', auctionState);
+                    io.emit('updatePlayers', await Player.find({ archived: { $ne: true } }));
+                    await broadcastStats();
+                    io.emit('newMessage', {
+                        sender: "SYSTEM",
+                        role: "admin",
+                        text: `❌ UNSOLD (TIME UP): ${player.name} received no bids and was moved to the unsold list.`
+                    });
+                } catch (err) {
+                    console.error("❌ Auto-Unsold Error:", err);
+                } finally {
+                    isProcessingSale = false;
+                }
             }
         } else {
             io.emit('updateAuction', auctionState);
