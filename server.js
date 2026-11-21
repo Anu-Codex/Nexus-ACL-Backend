@@ -224,7 +224,7 @@ let auctionState = {
     activePlayerId: null, 
     currentBid: 0, 
     highestBidder: 'No Bids Yet', 
-    timeLeft: 20,
+    timeLeft: 10,
     skippedTeams: [],
     isFinalCall: false,     // NEW
     finalCallText: "",
@@ -257,7 +257,7 @@ let isProcessingSale = false;
 
 function startTimer() {
     clearInterval(timerInterval);
-    auctionState.timeLeft = auctionState.isFinalCall ? 17 : 20;
+    auctionState.timeLeft = auctionState.isFinalCall ? 5 : 10;
 
     timerInterval = setInterval(async () => {
         if (isProcessingSale || !auctionState.activePlayerId) {
@@ -658,7 +658,7 @@ socket.on('startAuction', async ({ playerId, baseValue, isHidden }) => {
             activePlayerId: player, 
             currentBid: baseValue, 
             highestBidder: 'No Bids Yet', 
-            timeLeft: 20,
+            timeLeft: 10,
             skippedTeams: [],
             isFinalCall: false,
             finalCallText: "",
@@ -964,7 +964,7 @@ socket.on('hardResetDatabase', async () => {
             activePlayerId: null, 
             currentBid: 0, 
             highestBidder: 'No Bids Yet', 
-            timeLeft: 20,
+            timeLeft: 10,
             skippedTeams: [],
             isFinalCall: false,
             finalCallText: ""
@@ -1035,7 +1035,7 @@ socket.on('clearOnlyPlayers', async () => {
             activePlayerId: null, 
             currentBid: 0, 
             highestBidder: 'No Bids Yet', 
-            timeLeft: 20,
+            timeLeft: 10,
             skippedTeams: [],
             isFinalCall: false,
             finalCallText: ""
